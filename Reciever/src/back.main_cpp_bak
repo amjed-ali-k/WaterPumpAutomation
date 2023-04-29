@@ -1,0 +1,143 @@
+#define NSS D8
+#define RESET 0
+#define dio0 D2
+
+#define INCOMING_ON_MESSAGE "TURNON"
+#define INCOMING_OFF_MESSAGE "TURNOFF"
+
+#define OUTGOING_ON_RESPONSE "TURNEDON"
+#define OUTGOING_OFF_RESPONSE "TURNEDOFF"
+#define OUTGOING_LOCKED_RESPONSE "LOCKED"
+
+#define MOTOR_ON_COUNT_BEFORE_LOCK 5
+
+#define MOTOR_ON_PIN D1
+#define MOTOR_OFF_PIN D3
+
+#include <SPI.h>
+#include <LoRa.h>
+
+uint8_t motorStatus = 0;
+uint8_t motorOnCount = 0;
+
+// debug Serial Print Macros
+#define DEBUG 1
+
+#if DEBUG
+#define DEBUG_PRINT(x) Serial.print(x)
+#define DEBUG_PRINTLN(x) Serial.println(x)
+#define DEBUG_P(x)          \
+    Serial.print(millis()); \
+    Serial.print(F(": "));  \
+    Serial.println(x)
+#else
+#define DEBUG_PRINT(x)
+#define DEBUG_PRINTLN(x)
+#endif
+
+void onReceive(int packetSize)
+{
+    // received a packet
+    DEBUG_PRINT("Received packet '");
+
+    // // read packet
+    // for (int i = 0; i < packetSize; i++)
+    // {
+    //     DEBUG_PRINT((char)LoRa.read());
+    // }
+
+    // print RSSI of packet
+    DEBUG_PRINT("' with RSSI ");
+    DEBUG_PRINTLN(LoRa.packetRssi());
+
+    // handle motor according to the message
+    String message = String((char *)LoRa.read());
+    if (message == INCOMING_ON_MESSAGE)
+    {
+        motorOnCount++;
+
+        // lock motor if it has been turned on too many times
+        if (motorOnCount >= MOTOR_ON_COUNT_BEFORE_LOCK)
+        {
+            DEBUG_P("Locking motor");
+            digitalWrite(MOTOR_ON_PIN, LOW);
+            digitalWrite(MOTOR_OFF_PIN, LOW);
+            motorStatus = 2;
+
+            // send response
+            LoRa.beginPacket();
+            LoRa.print(OUTGOING_LOCKED_RESPONSE);
+            LoRa.endPacket();
+            LoRa.receive();
+            return;
+        }
+
+        DEBUG_P("Turning motor on");
+        digitalWrite(MOTOR_ON_PIN, HIGH);
+        digitalWrite(MOTOR_OFF_PIN, LOW);
+        motorStatus = 1;
+
+        // send response
+        LoRa.beginPacket();
+        LoRa.print(OUTGOING_ON_RESPONSE);
+        LoRa.endPacket();
+        LoRa.receive();
+    }
+    else if (message == INCOMING_OFF_MESSAGE)
+    {
+        DEBUG_P("Turning motor off");
+        digitalWrite(MOTOR_ON_PIN, LOW);
+        digitalWrite(MOTOR_OFF_PIN, HIGH);
+        motorStatus = 0;
+
+        // send response
+        LoRa.beginPacket();
+        LoRa.print(OUTGOING_OFF_RESPONSE);
+        LoRa.endPacket();
+        LoRa.receive();
+    }
+    else
+    {
+        DEBUG_PRINT("Unknown message: ");
+        DEBUG_PRINTLN(message);
+    }
+}
+
+void setup()
+{
+    Serial.begin(9600);
+    while (!Serial)
+        delay(10);
+
+    DEBUG_P("LoRa Receiver Callback");
+
+    LoRa.setPins(NSS, RESET, dio0);
+
+    if (!LoRa.begin(433E6))
+    {
+        DEBUG_P("Starting LoRa failed!");
+        while (1)
+            delay(10);
+    }
+
+    // register the receive callback
+    LoRa.onReceive(onReceive);
+    // put the radio into receive mode
+    LoRa.receive();
+}
+
+void loop()
+{
+    // turn off motor high pulse after 1 second
+    static unsigned long lastMotorOnTime = 0;
+    if (millis() - lastMotorOnTime > 5000)
+    {
+        DEBUG_P("Clearing motor pins every 1 second");
+        digitalWrite(MOTOR_ON_PIN, LOW);
+        digitalWrite(MOTOR_OFF_PIN, HIGH);
+        motorStatus = 0;
+        lastMotorOnTime = millis();
+        // put the radio into receive mode
+        LoRa.receive();
+    }
+}

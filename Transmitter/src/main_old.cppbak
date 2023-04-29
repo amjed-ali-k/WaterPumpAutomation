@@ -1,0 +1,171 @@
+#include <Arduino.h>
+
+#include <LoRa.h>
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+// Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
+#define OLED_RESET -1       // Reset pin # (or -1 if sharing Arduino reset pin)
+#define SCREEN_ADDRESS 0x3C ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+// Lora Module Pins
+#define LORA_NSS D8
+#define LORA_RESET D0
+#define LORA_DIO0 D3
+
+// GPIO
+#define MOTOR_ON_BUTTON D4
+#define MOTOR_OFF_BUTTON 10
+
+String lastMessage;
+u_int32_t lastMessageTime;
+
+bool motorStatus = false;
+bool lockStatus = false;
+
+void onRecieve(int packetSize)
+{
+  if (packetSize == 0)
+    return; // if there's no packet, return
+
+  // read packet
+  while (LoRa.available())
+  {
+    String message = LoRa.readString();
+    Serial.println(message);
+    if (message == "TURNED_ON")
+    {
+      motorStatus = true;
+    }
+    else if (message == "TURNED_OFF")
+    {
+      motorStatus = false;
+    }
+    else if (message == "LOCKED")
+    {
+      lockStatus = true;
+    }
+  }
+}
+
+void sendGiveMotorStatusSignal()
+{
+  LoRa.beginPacket();
+  LoRa.print(F("GET_STATUS"));
+  LoRa.endPacket();
+}
+
+void setup()
+{
+
+  Serial.begin(9600);
+
+  pinMode(MOTOR_ON_BUTTON, INPUT_PULLUP);
+  pinMode(MOTOR_OFF_BUTTON, INPUT_PULLUP);
+
+  // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
+  if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS))
+  {
+    Serial.println(F("SSD1306 allocation failed"));
+    for (;;)
+      ; // Don't proceed, loop forever
+  }
+
+  display.display();
+  delay(2000); // Pause for 2 seconds
+
+  // Clear the buffer
+  display.clearDisplay();
+
+  while (!Serial)
+  {
+    delay(100);
+  }
+
+  Serial.println("LoRa Sender");
+
+  LoRa.setPins(LORA_NSS, LORA_RESET, LORA_DIO0);
+
+  if (!LoRa.begin(433E6))
+  {
+    Serial.println("Starting LoRa failed!");
+    while (1)
+    {
+      delay(100);
+    };
+  }
+
+  LoRa.onReceive(onRecieve);
+
+  // get initial motor status
+  sendGiveMotorStatusSignal();
+
+  LoRa.receive();
+}
+
+void sendMotorOnSignal()
+{
+
+  LoRa.beginPacket();
+  LoRa.print(F("ON"));
+  LoRa.endPacket();
+}
+
+void sendMotorOffSignal()
+{
+
+  LoRa.beginPacket();
+  LoRa.print(F("OFF"));
+  LoRa.endPacket();
+}
+
+u_int32_t lastSendTime = 0;
+u_int32_t interval = 200;
+
+void loop()
+{
+  if ((millis() - lastSendTime > interval))
+  {
+    lastSendTime = millis(); // timestamp the message
+
+    // check motor button press status, if pressed send motor signal, only once in 10 seconds
+    if (digitalRead(MOTOR_ON_BUTTON) == LOW)
+    {
+      Serial.println("Motor On Button Pressed");
+      if (millis() - lastMessageTime > 10000)
+      {
+        sendMotorOnSignal();
+        Serial.println("Motor On Signal Sent");
+        lastMessageTime = millis();
+      }
+    }
+    else if (digitalRead(MOTOR_OFF_BUTTON) == LOW)
+    {
+      sendMotorOffSignal();
+      Serial.println("Motor Off Signal Sent");
+    }
+    // Serial Print Motor ON OFF button status
+    Serial.print("Motor On Button Status: ");
+    Serial.println(digitalRead(MOTOR_ON_BUTTON));
+    Serial.print("Motor Off Button Status: ");
+    Serial.println(digitalRead(MOTOR_OFF_BUTTON));
+
+    // display motor status
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+    display.setCursor(0, 0);
+    display.println("Motor Status:");
+    display.println(motorStatus ? "ON" : "OFF");
+    display.println("Lock Status:");
+    display.println(lockStatus ? "LOCKED" : "UNLOCKED");
+    display.display();
+    LoRa.receive(); // go back into receive mode
+  }
+}

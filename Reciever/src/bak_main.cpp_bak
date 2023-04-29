@@ -1,0 +1,137 @@
+#define MOTOR_ACTION_DELAY 3000
+#define MOTOR_LOCK_COUNT 3
+
+// GPIO
+#define MOTOR_UNLOCK_BUTTON D3
+#define MOTOR_ON_RELAY D4
+#define MOTOR_OFF_RELAY D1
+
+#include <Arduino.h>
+#include <LoRa.h>
+#include <SPI.h>
+
+// Lora Module Pins
+#define NSS D8
+#define RESET D0
+#define dio0 D4
+
+u_int32_t lastMessageTime;
+
+bool motorStatus = false;
+bool lockStatus = false;
+
+uint8_t motorOnCount = 0;
+
+void sendMotorTurnedOnFeedback()
+{
+
+  LoRa.beginPacket();
+  LoRa.print(F("TURNED_ON"));
+  LoRa.endPacket();
+}
+
+void sendMotorTurnedOffFeedback()
+{
+
+  LoRa.beginPacket();
+  LoRa.print(F("TURNED_OFF"));
+  LoRa.endPacket();
+}
+
+void sendMotorLockedFeedback()
+{
+  LoRa.beginPacket();
+  LoRa.print(F("LOCKED"));
+  LoRa.endPacket();
+}
+
+void onRecieve(int packetSize)
+{
+  // turn on relay for 3 second when recieve message
+  if (packetSize == 0)
+    return;
+
+  String message = "";
+
+  while (LoRa.available())
+  {
+    message += (char)LoRa.read();
+  }
+
+  if (message == "ON")
+  {
+
+    if (motorOnCount >= MOTOR_LOCK_COUNT)
+    {
+      sendMotorLockedFeedback();
+      return;
+    }
+
+    digitalWrite(MOTOR_OFF_RELAY, HIGH);
+    delay(MOTOR_ACTION_DELAY);
+    digitalWrite(MOTOR_OFF_RELAY, LOW);
+
+    delay(10000);
+
+    digitalWrite(MOTOR_ON_RELAY, HIGH);
+    delay(MOTOR_ACTION_DELAY);
+    digitalWrite(MOTOR_ON_RELAY, LOW);
+    sendMotorTurnedOnFeedback();
+    motorOnCount++;
+  }
+  else if (message == "OFF")
+  {
+    digitalWrite(MOTOR_OFF_RELAY, HIGH);
+    delay(MOTOR_ACTION_DELAY);
+    digitalWrite(MOTOR_OFF_RELAY, LOW);
+    sendMotorTurnedOffFeedback();
+  }
+  else if (message == "GET_STATUS")
+  {
+    if (lockStatus)
+    {
+      sendMotorLockedFeedback();
+    }
+    if (motorStatus)
+    {
+      sendMotorTurnedOnFeedback();
+    }
+    else
+    {
+      sendMotorTurnedOffFeedback();
+    }
+  }
+}
+
+void setup()
+{
+
+  pinMode(MOTOR_UNLOCK_BUTTON, INPUT_PULLUP);
+
+  pinMode(MOTOR_ON_RELAY, OUTPUT);
+  pinMode(MOTOR_OFF_RELAY, OUTPUT);
+
+  Serial.begin(115200);
+  Serial.println("LoRa Sender");
+
+  LoRa.setPins(NSS, RESET, dio0);
+  if (!LoRa.begin(433E6))
+  {
+    Serial.println("Starting LoRa failed!");
+    while (1)
+    {
+      delay(100);
+    };
+  }
+
+  LoRa.onReceive(onRecieve);
+}
+
+void loop()
+{
+  if (digitalRead(MOTOR_UNLOCK_BUTTON) == LOW)
+  {
+    motorOnCount = 0;
+  }
+  LoRa.receive();
+}
