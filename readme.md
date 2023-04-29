@@ -6,7 +6,7 @@
 ![Arduino CI](https://img.shields.io/badge/Arduino-00979D?style=for-the-badge&logo=Arduino&logoColor=white)
 ![C++ CI](https://img.shields.io/badge/C%2B%2B-00599C?style=for-the-badge&logo=c%2B%2B&logoColor=white)
 ![PlatformIO CI](https://img.shields.io/static/v1?label=Build&message=PlatformIO&color=orange&style=for-the-badge)
-![ESP8266 CI](https://img.shields.io/static/v1?label=ESP8266&message=NodeMCU&logo=espressif&color=orange&style=for-the-badge)
+![ESP8266 CI](https://img.shields.io/static/v1?label=ESP8266&message=NodeMCU&logo=espressif&color=red&style=for-the-badge)
 ![License](https://img.shields.io/github/license/amjed-ali-k/WaterPumpAutomation?style=for-the-badge)
 [![Bitcoin](https://img.shields.io/badge/Bitcoin-F7931A?logo=bitcoin&logoColor=fff&style=for-the-badge
 )](bitcoin://bc1qum3cr9cj7lxkyqgsljzphcugaprr3thhk5yl8r)
