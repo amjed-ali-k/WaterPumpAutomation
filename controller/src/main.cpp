@@ -4,6 +4,7 @@
 
 #define TRANSMITTER_ON_MESSAGE "TURNON"
 #define TRANSMITTER_OFF_MESSAGE "TURNOFF"
+#define TRANSMITTER_GET_STATUS_MESSAGE "GETSTATUS"
 
 #define RECIEVER_ON_RESPONSE "TURNEDON"
 #define RECIEVER_OFF_RESPONSE "TURNEDOFF"
@@ -35,16 +36,16 @@
 #define DEBUG 1
 
 #if DEBUG
-#define DEBUG_PRINT(x) Serial.print(x)
-#define DEBUG_PRINTLN(x) Serial.println(x)
-#define DEBUG_P(x)          \
+#define P(x) Serial.print(x)
+#define PLN(x) Serial.println(x)
+#define PT(x)               \
     Serial.print(millis()); \
     Serial.print(F(": "));  \
     Serial.println(x)
 #else
-#define DEBUG_PRINT(x)
-#define DEBUG_PRINTLN(x)
-#define DEBUG_P(x)
+#define P(x)
+#define PLN(x)
+#define PT(x)
 #endif
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
@@ -52,30 +53,13 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 bool motorStatus = false;
 bool lockStatus = false;
 
-void printOnDisplay(const String &message)
-{
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(WHITE);
-    display.setCursor(0, 0);
-    display.println(message);
-    display.display();
-    Serial.println(message);
-}
-
-void sendLoRaMessage(const String &message)
-{
-    LoRa.beginPacket();
-    LoRa.print(message);
-    LoRa.endPacket();
-}
-
 String message = "";
+uint8_t motorOnCount = 0;
 
 void onReceive(int packetSize)
 {
     // received a packet
-    DEBUG_PRINT("Received packet '");
+    P("Received packet '");
 
     // read packet
     for (int i = 0; i < packetSize; i++)
@@ -84,70 +68,135 @@ void onReceive(int packetSize)
     }
 
     // print RSSI of packet
-    DEBUG_PRINT("' with RSSI ");
-    DEBUG_PRINTLN(LoRa.packetRssi());
+    P("' with RSSI ");
+    PLN(LoRa.packetRssi());
+}
+
+void sendLoRaMessage(const String &msg)
+{
+    LoRa.beginPacket();
+    LoRa.print(msg);
+    LoRa.endPacket();
+}
+
+void printBottomMessageOnDisplay(const String &msg)
+{
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+    display.fillRect(0, 56, 128, 8, BLACK);
+    display.setCursor(0, 56);
+    display.println(msg);
+    display.display();
+}
+
+void printStatusOnDisplay(const String &msg)
+{
+    display.setTextSize(3);
+    display.setTextColor(WHITE);
+    display.fillRect(0, 0, 128, 24, BLACK);
+    display.setCursor(0, 0);
+    display.println(msg);
+    display.display();
 }
 
 void setup()
 {
     pinMode(MOTOR_ON_BUTTON, INPUT_PULLUP);
     pinMode(MOTOR_OFF_BUTTON, INPUT_PULLUP);
-
+#if DEBUG
     Serial.begin(9600);
+#endif
     // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
     if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS))
     {
-        Serial.println(F("SSD1306 allocation failed"));
+        P(F("SSD1306 allocation failed"));
         // Don't proceed, loop forever
         while (1)
         {
             delay(100);
         }
     }
-
-    display.display();
-    delay(2000); // Pause for 2 seconds
-
     // Clear the buffer
     display.clearDisplay();
-    display.display();
-
-    printOnDisplay("Display Initialized");
+    printStatusOnDisplay("N/A");
+    printBottomMessageOnDisplay("Initializing LoRa");
+    delay(1000);
 
     LoRa.setPins(LORA_NSS, LORA_RESET, LORA_DIO0);
     if (!LoRa.begin(433E6))
     {
-        printOnDisplay("Starting LoRa failed!");
-        delay(100);
+        printBottomMessageOnDisplay("Starting LoRa failed!");
         while (1)
-            ;
+            delay(100);
     }
-    printOnDisplay("LoRa Initialized");
+
+    // set the sync word, which must be the same for the transmitter and receiver
+    LoRa.setSyncWord(0xF3);
+    printBottomMessageOnDisplay("LoRa Initialized");
+    // register the receive callback
+    LoRa.onReceive(onReceive);
+    // put the radio into receive mode
+    P("LoRa Initialized");
+    LoRa.receive();
 }
 
 u_int32_t lastMessageTime;
 u_int32_t lastSendTime = 0;
 u_int32_t interval = 200;
+u_int32_t lastInputReadTime = 0;
+u_int32_t lastRecieveUpdateTime = 0;
 
 void loop()
 {
-
-    if (digitalRead(MOTOR_ON_BUTTON) == LOW)
+    if (millis() - lastInputReadTime > 200)
     {
-        printOnDisplay("Motor On Button Pressed");
-
-        if (millis() - lastMessageTime > 10000)
+        lastInputReadTime = millis();
+        if (digitalRead(MOTOR_ON_BUTTON) == LOW)
         {
-
-            printOnDisplay("Motor On Signal Sent");
-            sendLoRaMessage("Muhsin turned on the motor");
-            lastMessageTime = millis();
-            delay(2000);
+            if (millis() - lastMessageTime > 10000)
+            {
+                sendLoRaMessage(TRANSMITTER_ON_MESSAGE);
+                lastMessageTime = millis();
+                printBottomMessageOnDisplay("Sent MOTOR ON signal");
+            }
+            else
+            {
+                printBottomMessageOnDisplay("Wait for " + String(10 - (millis() - lastMessageTime) / 1000) + "s");
+            }
         }
+        else if (digitalRead(MOTOR_OFF_BUTTON) == LOW)
+        {
+            sendLoRaMessage(TRANSMITTER_OFF_MESSAGE);
+            printBottomMessageOnDisplay("Sent MOTOR OFF signal");
+        }
+        LoRa.receive();
     }
-    else if (digitalRead(MOTOR_OFF_BUTTON) == LOW)
+
+    if (millis() - lastRecieveUpdateTime > 1000)
+
     {
-        printOnDisplay("Motor Off Signal Sent");
-        sendLoRaMessage("Muhsin MOTOR OFF Cheythu");
+
+        lastRecieveUpdateTime = millis();
+        if (message != "")
+            printBottomMessageOnDisplay("Message Recieved! Message=" + message);
+
+        if (message == RECIEVER_LOCKED_RESPONSE)
+        {
+            printStatusOnDisplay("LOCK");
+        }
+        else if (message == RECIEVER_ON_RESPONSE)
+        {
+            printStatusOnDisplay("ON");
+        }
+        else if (message == RECIEVER_OFF_RESPONSE)
+        {
+            printStatusOnDisplay("OFF");
+        }
+        else if (message == RECIEVER_WAIT_RESPONSE)
+        {
+            printBottomMessageOnDisplay("Wait few seconds");
+        }
+        message = "";
+        LoRa.receive();
     }
 }
